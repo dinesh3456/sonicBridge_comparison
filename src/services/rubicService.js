@@ -8,74 +8,92 @@ class RubicService {
 
   async getBestRoute(params) {
     try {
-      // Format amounts to string if they aren't already
-      const srcAmount =
-        typeof params.amount === "string"
-          ? params.amount
-          : params.amount.toString();
-
-      const requestData = {
-        params: {
-          srcTokenAddress: params.sourceToken,
-          dstTokenAddress: params.destToken,
-          srcTokenAmount: srcAmount,
-          fromAddress: params.fromAddress || params.receiver,
-          receiver: params.receiver,
-          referrer: "rubic.exchange",
-          slippage: 0.5,
-          // Use blockchain names from documentation
-          srcTokenBlockchain: this.getBlockchainName(params.sourceChain),
-          dstTokenBlockchain: this.getBlockchainName(params.destChain),
-        },
+      // Format request body correctly
+      const requestBody = {
+        srcTokenAddress: params.sourceToken,
+        dstTokenAddress: params.destToken,
+        srcTokenAmount: params.amount,
+        fromAddress: params.fromAddress,
+        dstTokenBlockchain: CHAIN_NAMES[params.destChain],
+        srcTokenBlockchain: CHAIN_NAMES[params.sourceChain],
+        receiver: params.receiver || params.fromAddress,
+        slippage: 0.5,
+        referrer: "rubic.exchange",
       };
 
-      console.log("Rubic Request:", JSON.stringify(requestData, null, 2));
+      console.log("Rubic Request:", JSON.stringify(requestBody, null, 2));
 
+      // Get best quote
       const response = await axios.post(
         `${this.apiUrl}/routes/quoteBest`,
-        requestData
+        requestBody,
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
       );
 
-      return this.parseRubicResponse(response.data);
+      // Check if we got a valid response
+      if (!response.data) {
+        console.log("No data in Rubic response");
+        return null;
+      }
+
+      const quoteData = response.data;
+
+      // Get swap details if we have a valid quote
+      let swapData = null;
+      if (quoteData.id) {
+        try {
+          const swapResponse = await axios.post(
+            `${this.apiUrl}/routes/swap`,
+            {
+              ...requestBody,
+              id: quoteData.id,
+            },
+            {
+              headers: {
+                "Content-Type": "application/json",
+              },
+            }
+          );
+          swapData = swapResponse.data;
+        } catch (swapError) {
+          console.warn("Failed to get swap data:", swapError.message);
+        }
+      }
+
+      // Format response to match expected structure
+      return {
+        route: [
+          {
+            type: "cross-chain",
+            provider: "rubic",
+            ...quoteData,
+          },
+        ], // Ensure route is an array
+        fee: quoteData.fee || "0",
+        estimatedTime: quoteData.estimatedTime || 300,
+        gas: quoteData.gasLimit || 500000,
+        priceImpact: quoteData.priceImpact || 0,
+        amountOut: quoteData.toTokenAmount || params.amount,
+        totalCost:
+          Number(quoteData.fee || "0") + Number(quoteData.gasLimit || 500000),
+        swapTransaction: swapData?.transaction,
+        providers: quoteData.providers || [],
+      };
     } catch (error) {
-      console.error(
-        "Rubic route error:",
-        error.response?.data || error.message
-      );
+      if (error.response?.data?.messages) {
+        console.error("Rubic route error:", error.response.data.messages);
+      } else if (error.response?.data?.message) {
+        console.error("Rubic route error:", error.response.data.message);
+      } else {
+        console.error("Rubic route error:", error.message);
+      }
       return null;
     }
   }
-
-  getBlockchainName(chainId) {
-    // Map chain IDs to blockchain names as per Rubic documentation
-    const chainMap = {
-      1: "ETH",
-      137: "POLYGON",
-      56: "BSC",
-      42161: "ARBITRUM",
-      43114: "AVALANCHE",
-      10: "OPTIMISM",
-      250: "FANTOM",
-    };
-    return chainMap[chainId] || CHAIN_NAMES[chainId];
-  }
-
-  parseRubicResponse(data) {
-    if (!data) return null;
-
-    return {
-      route: data.route || [],
-      fee: data.route?.[0]?.totalFee?.amount || 0,
-      estimatedTime: 300, // 5 minutes estimated
-      gas:
-        data.route?.[0]?.txs?.reduce(
-          (total, tx) => total + (tx.gasFeeUsd || 0),
-          0
-        ) || 0,
-      priceImpact: data.route?.[0]?.priceImpact || 0,
-    };
-  }
 }
 
-// Export the class instead of an instance
 module.exports = RubicService;

@@ -3,11 +3,12 @@ const { BRIDGES } = require("../config/constants");
 
 class CrossCurveService {
   constructor() {
-    this.apiUrl = BRIDGES.CROSSCURVE.apiUrl;
+    this.apiUrl = "https://api.crosscurve.fi";
   }
 
   async getRoute(params) {
     try {
+      // Following the exact format from documentation
       const requestData = {
         params: {
           chainIdIn: Number(params.sourceChain),
@@ -20,11 +21,33 @@ class CrossCurveService {
       };
 
       console.log("CrossCurve Request:", JSON.stringify(requestData, null, 2));
-      const response = await axios.post(
-        `${this.apiUrl}/routing/scan`,
-        requestData
-      );
-      return this.parseCrossCurveResponse(response.data);
+
+      const response = await axios({
+        method: "post",
+        url: `${this.apiUrl}/routing/scan`,
+        data: requestData,
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+      });
+
+      if (!response.data || !response.data[0]) {
+        return null;
+      }
+
+      const routeData = response.data[0];
+      return {
+        route: routeData.route || [],
+        fee: routeData.totalFee?.amount || 0,
+        estimatedTime: 300,
+        gas: routeData.gasEstimate || 500000,
+        priceImpact: routeData.priceImpact || 0,
+        amountOut: routeData.amountOut || params.amount,
+        totalCost:
+          Number(routeData.totalFee?.amount || 0) +
+          Number(routeData.gasEstimate || 500000),
+      };
     } catch (error) {
       console.error(
         "CrossCurve route error:",
@@ -33,26 +56,6 @@ class CrossCurveService {
       return null;
     }
   }
-
-  parseCrossCurveResponse(data) {
-    if (!data) return null;
-
-    const fees =
-      data.fees?.map((fee) => ({
-        type: fee.type,
-        amount: fee.amount,
-        percent: fee.percent,
-      })) || [];
-
-    return {
-      route: data.route,
-      fee: fees.reduce((total, fee) => total + Number(fee.amount), 0),
-      estimatedTime: 300, // 5 minutes estimated
-      gas: data.gasEstimate || 0,
-      priceImpact: data.priceImpact || 0,
-    };
-  }
 }
 
-// Export the class instead of an instance
 module.exports = CrossCurveService;

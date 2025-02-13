@@ -6,12 +6,15 @@ class DeBridgeService {
     this.contractAddress = BRIDGES.DEBRIDGE.contractAddress;
   }
 
-  async createMessage(params) {
+  async getRoute(params) {
     try {
+      console.log("DeBridge Request:", JSON.stringify(params, null, 2));
+
+      // Create message without submission tracking since we don't have a provider
       const message = new evm.Message({
         tokenAddress: params.sourceToken,
         amount: params.amount,
-        chainIdTo: params.destChain,
+        chainIdTo: params.destChain.toString(),
         receiver: params.receiver,
         autoParams: new evm.SendAutoParams({
           executionFee: "0",
@@ -21,22 +24,23 @@ class DeBridgeService {
         }),
       });
 
-      return message.getEncodedArgs();
-    } catch (error) {
-      console.error("DeBridge message error:", error);
-      return null;
-    }
-  }
+      // Get encoded arguments
+      const argsForSend = message.getEncodedArgs();
 
-  async findSubmissions(txHash, context) {
-    try {
-      const submissions = await evm.Submission.findAll(txHash, context);
-      return submissions;
+      return {
+        route: argsForSend,
+        fee: "0",
+        estimatedTime: 300,
+        gas: 500000,
+        priceImpact: 0,
+        amountOut: params.amount,
+        totalCost: 500000,
+      };
     } catch (error) {
-      console.error("Error finding submissions:", error);
+      console.error("DeBridge route error:", error);
       return null;
     }
   }
 }
 
-module.exports = new DeBridgeService();
+module.exports = DeBridgeService;
